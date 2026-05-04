@@ -1,28 +1,23 @@
 using UnityEngine;
+using UnityEngine.EventSystems;
 
 public class Bucket : MonoBehaviour
 {
-    public bool isCorrectBucket; // Check in Inspector
+    public bool isCorrectBucket;
+    private RectTransform rectTransform;
 
     void Start()
     {
-        // Optional: Add a collider for detection
-        if (GetComponent<Collider2D>() == null)
-        {
-            BoxCollider2D col = gameObject.AddComponent<BoxCollider2D>();
-            col.isTrigger = true; // Important for detection
-        }
+        rectTransform = GetComponent<RectTransform>();
+        Debug.Log($"Bucket {name} initialized - isCorrectBucket: {isCorrectBucket}");
     }
 
-    void OnTriggerEnter2D(Collider2D other)
+    public bool IsMouseOverBucket()
     {
-        if (other.CompareTag("FallingWord"))
-        {
-            Word wordScript = other.GetComponent<Word>();
-            if (wordScript != null)
-            {
-                wordScript.OnSortedIntoBucket(isCorrectBucket);
-            }
-        }
+        if (rectTransform == null) return false;
+
+        // Check if mouse position is over this bucket
+        Vector2 mousePos = Input.mousePosition;
+        return RectTransformUtility.RectangleContainsScreenPoint(rectTransform, mousePos);
     }
 }

@@ -228,19 +228,33 @@ public class GameManager : MonoBehaviour
     {
         if (isBonusActive) return;
 
+        Debug.Log($"Starting spelling correction for word: {word.wordText}");
+
         currentWordForCorrection = word;
         isBonusActive = true;
         isGameActive = false;
 
         Time.timeScale = 0f; // Pause game
 
-        spellingPopup.SetActive(true);
-        spellingInput.text = "";
-        spellingInput.Select();
+        if (spellingPopup != null)
+        {
+            spellingPopup.SetActive(true);
+            if (spellingInput != null)
+            {
+                spellingInput.text = "";
+                spellingInput.Select();
+            }
+            Debug.Log("Spelling popup activated");
+        }
+        else
+        {
+            Debug.LogError("Spelling popup is null! Assign it in the Inspector");
+            EndSpellingCorrection(false);
+            return;
+        }
 
         StartCoroutine(BonusTimerRoutine());
     }
-
     IEnumerator BonusTimerRoutine()
     {
         float timer = bonusTimerDuration;

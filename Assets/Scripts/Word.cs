@@ -179,6 +179,34 @@ public class Word : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHand
     {
         isDragging = false;
 
+        // Check which bucket the mouse is over
+        Bucket targetBucket = null;
+
+        // Find all buckets and check if mouse is over them
+        Bucket[] buckets = FindObjectsOfType<Bucket>();
+        foreach (Bucket bucket in buckets)
+        {
+            if (bucket.IsMouseOverBucket())
+            {
+                targetBucket = bucket;
+                Debug.Log($"Mouse over bucket: {bucket.name}");
+                break;
+            }
+        }
+
+        if (targetBucket != null)
+        {
+            // Dropped on a bucket
+            Debug.Log($"Word {wordText} dropped on bucket {targetBucket.name}");
+            OnSortedIntoBucket(targetBucket.isCorrectBucket);
+        }
+        else
+        {
+            // Not dropped on bucket - reset position
+            rectTransform.anchoredPosition = originalAnchoredPosition;
+            Debug.Log($"Word {wordText} dropped outside bucket - resetting position");
+        }
+
         // Restore appearance
         if (canvasGroup != null)
         {
@@ -186,52 +214,75 @@ public class Word : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHand
             canvasGroup.blocksRaycasts = true;
         }
 
+        // Restore original color
         Image img = GetComponent<Image>();
         if (img != null)
         {
             img.color = originalColor;
         }
 
+        // Restore text size
         if (wordDisplay != null)
         {
             wordDisplay.fontSize = originalFontSize;
             wordDisplay.color = Color.black;
         }
-
-        // DON'T reset position immediately - let the bucket detection handle it
-        // rectTransform.anchoredPosition = originalAnchoredPosition; // COMMENT THIS OUT
-
-        Debug.Log($"Stopped dragging: {wordText}");
     }
     public void OnSortedIntoBucket(bool isBucketCorrect)
     {
-        bool sortedCorrectly = (isBucketCorrect == isCorrectSpelling);
+        // Determine if the sorting was correct
+        bool sortedCorrectly = false;
+        int pointsToAdd = 0;
+        string message = "";
 
-        Debug.Log($"Word '{wordText}' - Sorted correctly? {sortedCorrectly}");
-
-        if (sortedCorrectly)
+        if (isCorrectSpelling && isBucketCorrect)
         {
-            // Correct word in correct bucket OR incorrect word in incorrect bucket
-            if (ScoreManager.Instance != null)
-                ScoreManager.Instance.AddPoints(10);
-            Debug.Log($"✓ Correct! +10 points. Word: {wordText}");
-            Destroy(gameObject);
+            // Correct word in CORRECT bucket
+            sortedCorrectly = true;
+            pointsToAdd = 10;
+            message = $"✓ Correct! '{wordText}' in correct bucket! +10 points";
         }
         else if (!isCorrectSpelling && !isBucketCorrect)
         {
-            // Misspelled word in incorrect bucket - trigger spelling bonus
-            Debug.Log($"✗ Misspelled word in incorrect bucket! Triggering spelling bonus for: {wordText}");
+            // Misspelled word in INCORRECT bucket - trigger spelling bonus
+            sortedCorrectly = true;
+            pointsToAdd = 10;
+            message = $"✓ Misspelled word in incorrect bucket! +10 points + bonus opportunity!";
+
+            // Trigger the spelling bonus popup
             if (GameManager.Instance != null)
+            {
+                Debug.Log("Triggering spelling correction bonus...");
                 GameManager.Instance.StartSpellingCorrection(this);
-            else
-                Destroy(gameObject);
+                return; // Don't destroy the word yet - the bonus system will handle it
+            }
         }
-        else
+        else if (isCorrectSpelling && !isBucketCorrect)
         {
-            // Wrong bucket
-            if (ScoreManager.Instance != null)
-                ScoreManager.Instance.AddPoints(-5);
-            Debug.Log($"✗ Wrong bucket! -5 points. Word: {wordText}");
+            // Correct word in INCORRECT bucket
+            sortedCorrectly = false;
+            pointsToAdd = -5;
+            message = $"✗ '{wordText}' is correct but put in wrong bucket! -5 points";
+        }
+        else if (!isCorrectSpelling && isBucketCorrect)
+        {
+            // Misspelled word in CORRECT bucket
+            sortedCorrectly = false;
+            pointsToAdd = -5;
+            message = $"✗ '{wordText}' is misspelled but put in correct bucket! -5 points";
+        }
+
+        // Add points
+        if (ScoreManager.Instance != null)
+        {
+            ScoreManager.Instance.AddPoints(pointsToAdd);
+        }
+
+        Debug.Log(message);
+
+        // Destroy the word (unless bonus was triggered)
+        if (!(!isCorrectSpelling && !isBucketCorrect))
+        {
             Destroy(gameObject);
         }
     }

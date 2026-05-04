@@ -134,7 +134,8 @@ TextureImporter:
     secondaryTextures: []
     spriteCustomMetadata:
       entries: []
-    nameFileIdTable: {}
+    nameFileIdTable:
+      WordGameBackground_0: 391109480814780168
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 
