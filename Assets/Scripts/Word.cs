@@ -181,7 +181,6 @@ public class Word : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHand
         if (targetBucket != null)
         {
             // Dropped on a bucket - process the sorting
-            Debug.Log($"Sorting word {wordText} into bucket. Is correct bucket? {targetBucket.isCorrectBucket}");
             OnSortedIntoBucket(targetBucket.isCorrectBucket);
         }
         else
@@ -216,57 +215,52 @@ public class Word : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHand
 
     public void OnSortedIntoBucket(bool isBucketCorrect)
     {
-        // Determine if the sorting was correct
         int pointsToAdd = 0;
         string message = "";
 
+        // Rule 1: Correct word in correct bucket = +10 points
         if (isCorrectSpelling && isBucketCorrect)
         {
-            // Correct word in CORRECT bucket
             pointsToAdd = 10;
-            message = $"✓ Correct! '{wordText}' in correct bucket! +10 points";
+            message = $"✓ Correct word '{wordText}' in correct bucket! +10 points";
+            if (ScoreManager.Instance != null)
+                ScoreManager.Instance.AddPoints(pointsToAdd);
+            Destroy(gameObject);
         }
-        else if (!isCorrectSpelling && !isBucketCorrect)
+        // Rule 2: Word put into incorrect bucket = +5 points (any word, any bucket that's wrong)
+        else if (!isBucketCorrect)
         {
-            // Misspelled word in INCORRECT bucket - trigger spelling bonus
-            pointsToAdd = 10;
-            message = $"✓ Misspelled word in incorrect bucket! +10 points + bonus opportunity!";
-
-            // Add points first
+            pointsToAdd = 5;
+            message = $"✓ Word '{wordText}' put in incorrect bucket! +5 points";
             if (ScoreManager.Instance != null)
                 ScoreManager.Instance.AddPoints(pointsToAdd);
 
-            // Trigger the spelling bonus popup
-            if (GameManager.Instance != null)
+            // If it's a misspelled word AND in incorrect bucket, also trigger bonus
+            if (!isCorrectSpelling)
             {
-                Debug.Log("Triggering spelling correction bonus...");
-                GameManager.Instance.StartSpellingCorrection(this);
-                return; // Don't destroy the word yet - the bonus system will handle it
+                Debug.Log($"Misspelled word in incorrect bucket - triggering spelling bonus!");
+                if (GameManager.Instance != null)
+                {
+                    GameManager.Instance.StartSpellingCorrection(this);
+                    return; // Don't destroy yet - bonus system handles it
+                }
             }
+            Destroy(gameObject);
         }
-        else if (isCorrectSpelling && !isBucketCorrect)
-        {
-            // Correct word in INCORRECT bucket
-            pointsToAdd = -5;
-            message = $"✗ '{wordText}' is correct but put in wrong bucket! -5 points";
-        }
+        // Rule: Correct word in correct bucket already handled above
+        // Any other combination? (misspelled in correct bucket)
         else if (!isCorrectSpelling && isBucketCorrect)
         {
-            // Misspelled word in CORRECT bucket
-            pointsToAdd = -5;
-            message = $"✗ '{wordText}' is misspelled but put in correct bucket! -5 points";
-        }
-
-        // Add points (skip if already added for bonus case)
-        if (!(!isCorrectSpelling && !isBucketCorrect))
-        {
+            pointsToAdd = 0;
+            message = $"Word '{wordText}' is misspelled in correct bucket - no points";
             if (ScoreManager.Instance != null)
                 ScoreManager.Instance.AddPoints(pointsToAdd);
+            Destroy(gameObject);
         }
 
         Debug.Log(message);
 
-        // Destroy the word (unless bonus was triggered)
+        // If we haven't destroyed yet and not triggering bonus
         if (!(!isCorrectSpelling && !isBucketCorrect))
         {
             Destroy(gameObject);

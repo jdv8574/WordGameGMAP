@@ -20,7 +20,7 @@ public class GameManager : MonoBehaviour
 
     [Header("Spelling Bonus")]
     private Word currentWordForCorrection;
-    private string currentCorrectSpelling; 
+    private string currentCorrectSpelling;
     private string currentWrongWord;
     public GameObject spellingPopup;
     public TMP_InputField spellingInput;
@@ -29,6 +29,7 @@ public class GameManager : MonoBehaviour
     private Coroutine spawningCoroutine;
     private Coroutine bonusTimerCoroutine;
     private List<GameObject> activeWords = new List<GameObject>();
+    private List<Coroutine> activeFallCoroutines = new List<Coroutine>(); // Track fall coroutines
 
     [Header("Word Database")]
     private List<WordData> wordDatabase = new List<WordData>();
@@ -54,14 +55,12 @@ public class GameManager : MonoBehaviour
         LoadWordDatabase();
         gameTimer = gameDuration;
 
-        // Find canvas if not assigned
         if (gameCanvas == null)
         {
             gameCanvas = FindObjectOfType<Canvas>();
             Debug.Log($"Found canvas: {gameCanvas?.name}");
         }
 
-        // Ensure spawn point is set up
         if (spawnPoint == null)
         {
             GameObject spawn = new GameObject("SpawnPoint");
@@ -72,13 +71,11 @@ public class GameManager : MonoBehaviour
             Debug.Log("Created spawn point at top center");
         }
 
-        // Start spawning
         StartSpawning();
 
         if (spellingPopup != null)
             spellingPopup.SetActive(false);
 
-        // Ensure time scale starts at 1
         Time.timeScale = 1f;
     }
 
@@ -174,10 +171,8 @@ public class GameManager : MonoBehaviour
         bool useCorrect = Random.value > 0.5f;
         string wordToShow = useCorrect ? data.correctWord : data.misspelling;
 
-        // Instantiate word as child of canvas
         GameObject newWord = Instantiate(wordPrefab, gameCanvas.transform);
 
-        // Set initial position at spawn point
         RectTransform rect = newWord.GetComponent<RectTransform>();
         if (rect != null && spawnPoint != null)
         {
@@ -198,11 +193,11 @@ public class GameManager : MonoBehaviour
             wordScript.Initialize(wordToShow, data.definition, useCorrect, useCorrect ? "" : data.correctWord);
         }
 
-        // Track active word
         activeWords.Add(newWord);
 
-        // Start falling coroutine
-        StartCoroutine(FallWord(newWord));
+        // Track the coroutine
+        Coroutine fallCoroutine = StartCoroutine(FallWord(newWord));
+        activeFallCoroutines.Add(fallCoroutine);
     }
 
     IEnumerator FallWord(GameObject word)
@@ -213,12 +208,12 @@ public class GameManager : MonoBehaviour
         if (rect == null) yield break;
 
         float fallSpeed = 150f;
-        float bottomY = -980f;
+        float bottomY = -527f;
 
-        while (word != null && rect.anchoredPosition.y > bottomY && isGameActive)
+        while (word != null && rect.anchoredPosition.y > bottomY)
         {
-            // Only fall if not in bonus mode
-            if (!isBonusActive)
+            // Only fall if not in bonus mode AND game is active
+            if (!isBonusActive && isGameActive)
             {
                 Vector2 newPos = rect.anchoredPosition;
                 newPos.y -= fallSpeed * Time.deltaTime;
@@ -227,13 +222,19 @@ public class GameManager : MonoBehaviour
             yield return null;
         }
 
-        // Word reached bottom without being sorted
-        if (word != null)
+        // Word reached bottom without being sorted - ONLY penalize if not in bonus mode
+        if (word != null && !isBonusActive && isGameActive)
         {
-            Debug.Log($"Word reached bottom at Y: {rect.anchoredPosition.y}");
+            Debug.Log($"Word '{word.GetComponent<Word>()?.wordText}' fell off screen! -10 points");
             if (ScoreManager.Instance != null)
-                ScoreManager.Instance.AddPoints(-5);
+                ScoreManager.Instance.AddPoints(-10);
 
+            activeWords.Remove(word);
+            Destroy(word);
+        }
+        else if (word != null)
+        {
+            // Word was destroyed during bonus mode - just remove from tracking
             activeWords.Remove(word);
             Destroy(word);
         }
@@ -247,7 +248,6 @@ public class GameManager : MonoBehaviour
         Debug.Log($"Word: {word.wordText}");
         Debug.Log($"Correct spelling: {word.correctSpelling}");
 
-        // Stop any existing bonus timer
         if (bonusTimerCoroutine != null)
         {
             StopCoroutine(bonusTimerCoroutine);
@@ -255,18 +255,17 @@ public class GameManager : MonoBehaviour
         }
 
         currentWordForCorrection = word;
-        currentCorrectSpelling = word.correctSpelling; // Store the correct spelling separately
-        currentWrongWord = word.wordText; // Store the wrong word
+        currentCorrectSpelling = word.correctSpelling;
+        currentWrongWord = word.wordText;
         isBonusActive = true;
         isGameActive = false;
 
-        // Stop spawning
         StopSpawning();
 
-        // Pause the game
-        Time.timeScale = 0f;
+        // Note: We DON'T pause time or destroy other words
+        // The FallWord coroutines check isBonusActive and will pause automatically
 
-        // Show popup on top
+        // Show popup
         if (spellingPopup != null)
         {
             spellingPopup.SetActive(true);
@@ -280,7 +279,6 @@ public class GameManager : MonoBehaviour
             }
         }
 
-        // Start bonus timer
         bonusTimerCoroutine = StartCoroutine(BonusTimerRoutine());
     }
 
@@ -292,9 +290,6 @@ public class GameManager : MonoBehaviour
         {
             if (UIManager.Instance != null)
                 UIManager.Instance.UpdateBonusTimer(timer);
-
-            string timeText = timer.ToString("F1");
-            Debug.Log($"Bonus timer: {timeText}");
 
             yield return new WaitForSecondsRealtime(0.1f);
             timer -= 0.1f;
@@ -310,8 +305,6 @@ public class GameManager : MonoBehaviour
     public void SubmitSpellingCorrection()
     {
         Debug.Log("=== SUBMIT SPELLING CORRECTION CALLED IN GAMEMANAGER ===");
-        Debug.Log($"isBonusActive: {isBonusActive}");
-        Debug.Log($"currentCorrectSpelling: '{currentCorrectSpelling}'");
 
         if (!isBonusActive)
         {
@@ -340,7 +333,6 @@ public class GameManager : MonoBehaviour
         bool isCorrect = (submitted == currentCorrectSpelling);
         Debug.Log($"Comparing '{submitted}' with '{currentCorrectSpelling}': {isCorrect}");
 
-        // Stop the bonus timer coroutine
         if (bonusTimerCoroutine != null)
         {
             StopCoroutine(bonusTimerCoroutine);
@@ -353,45 +345,34 @@ public class GameManager : MonoBehaviour
     void EndSpellingCorrection(bool wasCorrect)
     {
         Debug.Log($"=== ENDING SPELLING CORRECTION ===");
-        Debug.Log($"Was correct: {wasCorrect}");
 
-        // Stop bonus timer coroutine
         if (bonusTimerCoroutine != null)
         {
             StopCoroutine(bonusTimerCoroutine);
             bonusTimerCoroutine = null;
         }
 
-        // Award points
+        // Award bonus points
         if (wasCorrect)
         {
             if (ScoreManager.Instance != null)
-                ScoreManager.Instance.AddPoints(20);
-            Debug.Log($"✓ Bonus! +20 points for correct spelling of '{currentCorrectSpelling}'");
+                ScoreManager.Instance.AddPoints(15); // Changed to 15 as per your rules
+            Debug.Log($"✓ Bonus! +15 points for correct spelling");
         }
         else
         {
-            if (ScoreManager.Instance != null)
-                ScoreManager.Instance.AddPoints(-5);
-            Debug.Log($"✗ No bonus - incorrect spelling. Correct was '{currentCorrectSpelling}'");
+            Debug.Log($"✗ No bonus - incorrect spelling");
         }
 
         // Close popup
         if (spellingPopup != null)
             spellingPopup.SetActive(false);
 
-        // Resume game
-        Time.timeScale = 1f;
-
-        // Reset game state
+        // Reset game state (but don't change time scale)
         isBonusActive = false;
         isGameActive = true;
 
-        // Clear stored data
-        currentCorrectSpelling = "";
-        currentWrongWord = "";
-
-        // Remove and destroy the bonus word
+        // Remove and destroy the bonus word only
         if (currentWordForCorrection != null)
         {
             activeWords.Remove(currentWordForCorrection.gameObject);
@@ -404,6 +385,8 @@ public class GameManager : MonoBehaviour
         {
             StartSpawning();
         }
+
+        Debug.Log("Bonus mode ended - words will resume falling");
     }
 
     public void RemoveWord(GameObject word)
