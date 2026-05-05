@@ -1,6 +1,6 @@
 ﻿using UnityEngine;
-using UnityEngine.UI;
 using UnityEngine.EventSystems;
+using UnityEngine.UI;
 using TMPro;
 
 public class Word : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler
@@ -20,7 +20,6 @@ public class Word : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHand
     private CanvasGroup canvasGroup;
     private RectTransform rectTransform;
     private bool isDragging = false;
-    private Vector2 dragOffset;
     private Color originalColor;
     private float originalFontSize;
 
@@ -35,7 +34,7 @@ public class Word : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHand
         if (rectTransform == null)
             Debug.LogError("Word prefab needs a RectTransform!");
 
-        // Store original colors for debug
+        // Store original colors
         Image img = GetComponent<Image>();
         if (img != null)
             originalColor = img.color;
@@ -61,7 +60,7 @@ public class Word : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHand
         if (tooltipPanel != null)
             tooltipPanel.SetActive(false);
 
-        // Add collider for bucket detection
+        // Add collider for raycast detection
         if (GetComponent<Collider2D>() == null)
         {
             var col = gameObject.AddComponent<BoxCollider2D>();
@@ -84,29 +83,23 @@ public class Word : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHand
         correctSpelling = correctWord;
 
         if (wordDisplay != null)
+        {
             wordDisplay.text = word;
+            wordDisplay.fontSize = originalFontSize;
+            wordDisplay.color = Color.black;
+        }
 
         if (definitionDisplay != null)
             definitionDisplay.text = def;
-
-        gameObject.SetActive(true);
 
         // Reset visual state
         Image img = GetComponent<Image>();
         if (img != null)
             img.color = originalColor;
 
-        if (wordDisplay != null)
-        {
-            wordDisplay.fontSize = originalFontSize;
-            wordDisplay.color = Color.black;
-        }
+        gameObject.SetActive(true);
     }
 
-    public bool IsDragging()
-    {
-        return isDragging;
-    }
     void Update()
     {
         // Skip if dragging
@@ -114,32 +107,25 @@ public class Word : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHand
             return;
 
         // Simple hover detection for tooltip
-        Rect rect = rectTransform.rect;
-        rect.position = rectTransform.position;
+        Vector2 mousePos = Input.mousePosition;
+        bool isOver = RectTransformUtility.RectangleContainsScreenPoint(rectTransform, mousePos);
 
-        if (rect.Contains(Input.mousePosition))
+        if (isOver && !tooltipPanel.activeSelf)
         {
-            if (!tooltipPanel.activeSelf)
-                tooltipPanel.SetActive(true);
+            tooltipPanel.SetActive(true);
         }
-        else
+        else if (!isOver && tooltipPanel.activeSelf)
         {
-            if (tooltipPanel.activeSelf)
-                tooltipPanel.SetActive(false);
+            tooltipPanel.SetActive(false);
         }
     }
-
-
 
     public void OnBeginDrag(PointerEventData eventData)
     {
         isDragging = true;
         originalAnchoredPosition = rectTransform.anchoredPosition;
 
-        // IMPORTANT: Disable the falling script/component if you have one
-        // If the word has a separate falling script, disable it here
-
-        // Make word semi-transparent and highlight while dragging
+        // Make word semi-transparent while dragging
         if (canvasGroup != null)
         {
             canvasGroup.alpha = 0.8f;
@@ -159,6 +145,7 @@ public class Word : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHand
             wordDisplay.color = Color.red;
         }
 
+        // Hide tooltip while dragging
         if (tooltipPanel != null)
             tooltipPanel.SetActive(false);
 
@@ -169,15 +156,42 @@ public class Word : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHand
     {
         if (rectTransform == null) return;
 
-        // Move the word
+        // Move word with mouse
         rectTransform.position = Input.mousePosition;
-
-        Debug.Log($"Dragging to: {rectTransform.position}");
     }
 
     public void OnEndDrag(PointerEventData eventData)
     {
         isDragging = false;
+
+        // Check which bucket the mouse is over
+        Bucket targetBucket = null;
+        Bucket[] buckets = FindObjectsOfType<Bucket>();
+
+        foreach (Bucket bucket in buckets)
+        {
+            if (bucket.IsMouseOverBucket())
+            {
+                targetBucket = bucket;
+                Debug.Log($"Word dropped on bucket: {bucket.name}");
+                break;
+            }
+        }
+
+        if (targetBucket != null)
+        {
+            // Dropped on a bucket - process the sorting
+            OnSortedIntoBucket(targetBucket.isCorrectBucket);
+        }
+        else
+        {
+            // Not dropped on bucket - return to original position
+            if (rectTransform != null)
+            {
+                rectTransform.anchoredPosition = originalAnchoredPosition;
+            }
+            Debug.Log($"Word {wordText} dropped outside bucket - returning to position");
+        }
 
         // Restore appearance
         if (canvasGroup != null)
@@ -197,42 +211,64 @@ public class Word : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHand
             wordDisplay.fontSize = originalFontSize;
             wordDisplay.color = Color.black;
         }
-
-        // DON'T reset position immediately - let the bucket detection handle it
-        // rectTransform.anchoredPosition = originalAnchoredPosition; // COMMENT THIS OUT
-
-        Debug.Log($"Stopped dragging: {wordText}");
     }
+
     public void OnSortedIntoBucket(bool isBucketCorrect)
     {
-        bool sortedCorrectly = (isBucketCorrect == isCorrectSpelling);
+        int pointsToAdd = 0;
+        string message = "";
 
-        Debug.Log($"Word '{wordText}' - Sorted correctly? {sortedCorrectly}");
-
-        if (sortedCorrectly)
+        // Rule 1: Correct word in correct bucket = +10 points
+        if (isCorrectSpelling && isBucketCorrect)
         {
-            // Correct word in correct bucket OR incorrect word in incorrect bucket
+            pointsToAdd = 10;
+            message = $"✓ Correct word '{wordText}' in correct bucket! +10 points";
             if (ScoreManager.Instance != null)
-                ScoreManager.Instance.AddPoints(10);
-            Debug.Log($"✓ Correct! +10 points. Word: {wordText}");
+                ScoreManager.Instance.AddPoints(pointsToAdd);
             Destroy(gameObject);
         }
-        else if (!isCorrectSpelling && !isBucketCorrect)
+        // Rule 2: Word put into incorrect bucket = +5 points (any word, any bucket that's wrong)
+        else if (!isBucketCorrect)
         {
-            // Misspelled word in incorrect bucket - trigger spelling bonus
-            Debug.Log($"✗ Misspelled word in incorrect bucket! Triggering spelling bonus for: {wordText}");
-            if (GameManager.Instance != null)
-                GameManager.Instance.StartSpellingCorrection(this);
-            else
-                Destroy(gameObject);
-        }
-        else
-        {
-            // Wrong bucket
+            pointsToAdd = 5;
+            message = $"✓ Word '{wordText}' put in incorrect bucket! +5 points";
             if (ScoreManager.Instance != null)
-                ScoreManager.Instance.AddPoints(-5);
-            Debug.Log($"✗ Wrong bucket! -5 points. Word: {wordText}");
+                ScoreManager.Instance.AddPoints(pointsToAdd);
+
+            // If it's a misspelled word AND in incorrect bucket, also trigger bonus
+            if (!isCorrectSpelling)
+            {
+                Debug.Log($"Misspelled word in incorrect bucket - triggering spelling bonus!");
+                if (GameManager.Instance != null)
+                {
+                    GameManager.Instance.StartSpellingCorrection(this);
+                    return; // Don't destroy yet - bonus system handles it
+                }
+            }
             Destroy(gameObject);
         }
+        // Rule: Correct word in correct bucket already handled above
+        // Any other combination? (misspelled in correct bucket)
+        else if (!isCorrectSpelling && isBucketCorrect)
+        {
+            pointsToAdd = 0;
+            message = $"Word '{wordText}' is misspelled in correct bucket - no points";
+            if (ScoreManager.Instance != null)
+                ScoreManager.Instance.AddPoints(pointsToAdd);
+            Destroy(gameObject);
+        }
+
+        Debug.Log(message);
+
+        // If we haven't destroyed yet and not triggering bonus
+        if (!(!isCorrectSpelling && !isBucketCorrect))
+        {
+            Destroy(gameObject);
+        }
+    }
+
+    public bool IsBeingDragged()
+    {
+        return isDragging;
     }
 }
