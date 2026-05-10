@@ -1,6 +1,7 @@
 ﻿using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using TMPro;
 
 public class GameManager : MonoBehaviour
@@ -11,34 +12,42 @@ public class GameManager : MonoBehaviour
     public GameObject wordPrefab;
     public Transform spawnPoint;
     public Canvas gameCanvas;
-    public float spawnInterval = 2f;
+    public float baseSpawnInterval = 2f;
+    private float currentSpawnInterval;
+    private bool isGameActive = true;
 
     [Header("Timers")]
     public float gameDuration = 60f;
     private float gameTimer;
-    private bool isGameActive = true;
+    public UnityEngine.UI.Image timerFillImage; // Visual timer
+    private bool isPaused = false;
 
-    [Header("Spelling Bonus")]
-    private Word currentWordForCorrection;
-    private string currentCorrectSpelling;
-    private string currentWrongWord;
-    public GameObject spellingPopup;
-    public TMP_InputField spellingInput;
-    public float bonusTimerDuration = 5f;
-    private bool isBonusActive = false;
-    private Coroutine spawningCoroutine;
-    private Coroutine bonusTimerCoroutine;
-    private List<GameObject> activeWords = new List<GameObject>();
-    private List<Coroutine> activeFallCoroutines = new List<Coroutine>(); // Track fall coroutines
+    [Header("Power-ups")]
+    public bool spellingCorrectionPowerUpEnabled = false;
+    private bool isPowerUpActive = false;
+    private float powerUpDuration = 5f;
+    private float originalSpawnInterval;
+    private float originalFallSpeed;
+
+    [Header("Scoring")]
+    private int currentScore = 0;
+    private int combo = 0;
+    private float lastScoreTime = 0f;
+    private const float COMBO_WINDOW = 2f;
 
     [Header("Word Database")]
     private List<WordData> wordDatabase = new List<WordData>();
+    private System.Random random = new System.Random();
+
+    [Header("Visual Feedback")]
+    public GameObject scorePopupPrefab;
+    public Color correctColor = Color.green;
+    public Color wrongColor = Color.red;
 
     [System.Serializable]
     public class WordData
     {
         public string correctWord;
-        public string definition;
         public string misspelling;
     }
 
@@ -52,15 +61,18 @@ public class GameManager : MonoBehaviour
 
     void Start()
     {
-        LoadWordDatabase();
+        LoadWordDatabaseFromFile();
         gameTimer = gameDuration;
+        currentSpawnInterval = baseSpawnInterval;
+        originalSpawnInterval = baseSpawnInterval;
 
+        // Find canvas if not assigned
         if (gameCanvas == null)
         {
             gameCanvas = FindObjectOfType<Canvas>();
-            Debug.Log($"Found canvas: {gameCanvas?.name}");
         }
 
+        // Set up spawn point
         if (spawnPoint == null)
         {
             GameObject spawn = new GameObject("SpawnPoint");
@@ -68,40 +80,23 @@ public class GameManager : MonoBehaviour
             spawnPoint = spawn.transform;
             RectTransform rect = spawnPoint.gameObject.AddComponent<RectTransform>();
             rect.anchoredPosition = new Vector2(0, 400);
-            Debug.Log("Created spawn point at top center");
         }
 
         StartSpawning();
-
-        if (spellingPopup != null)
-            spellingPopup.SetActive(false);
-
         Time.timeScale = 1f;
-    }
-
-    void StartSpawning()
-    {
-        if (spawningCoroutine != null)
-        {
-            StopCoroutine(spawningCoroutine);
-        }
-        spawningCoroutine = StartCoroutine(SpawnWords());
-    }
-
-    void StopSpawning()
-    {
-        if (spawningCoroutine != null)
-        {
-            StopCoroutine(spawningCoroutine);
-            spawningCoroutine = null;
-        }
     }
 
     void Update()
     {
-        if (!isGameActive || isBonusActive) return;
+        if (!isGameActive || isPaused) return;
 
         gameTimer -= Time.deltaTime;
+
+        // Update visual timer
+        if (timerFillImage != null)
+        {
+            timerFillImage.fillAmount = gameTimer / gameDuration;
+        }
 
         if (UIManager.Instance != null)
             UIManager.Instance.UpdateTimer(gameTimer);
@@ -112,63 +107,131 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    void LoadWordDatabase()
+    void LoadWordDatabaseFromFile()
     {
         wordDatabase.Clear();
-        wordDatabase.Add(new WordData
+
+        // For now, use a subset of the words file
+        // You can load from the actual file using Resources.Load or direct file reading
+
+        // Sample loading from Resources folder
+        TextAsset wordFile = Resources.Load<TextAsset>("words_alpha");
+        if (wordFile != null)
         {
-            correctWord = "necessary",
-            definition = "required to be done; essential",
-            misspelling = "neccessary"
-        });
-        wordDatabase.Add(new WordData
+            string[] words = wordFile.text.Split('\n');
+            foreach (string word in words)
+            {
+                if (!string.IsNullOrWhiteSpace(word))
+                {
+                    string cleanWord = word.Trim().ToLower();
+                    if (cleanWord.Length >= 3 && cleanWord.Length <= 8) // Filter by length
+                    {
+                        WordData data = new WordData();
+                        data.correctWord = cleanWord;
+                        data.misspelling = GenerateMisspelling(cleanWord);
+                        wordDatabase.Add(data);
+                    }
+                }
+            }
+        }
+
+        // Fallback if no file found
+        if (wordDatabase.Count == 0)
         {
-            correctWord = "definitely",
-            definition = "without doubt",
-            misspelling = "definately"
-        });
-        wordDatabase.Add(new WordData
-        {
-            correctWord = "separate",
-            definition = "to move apart",
-            misspelling = "seperate"
-        });
-        wordDatabase.Add(new WordData
-        {
-            correctWord = "accommodate",
-            definition = "to provide with something needed",
-            misspelling = "accomodate"
-        });
-        wordDatabase.Add(new WordData
-        {
-            correctWord = "embarrass",
-            definition = "to cause to feel self-conscious",
-            misspelling = "embarass"
-        });
+            AddFallbackWords();
+        }
 
         Debug.Log($"Loaded {wordDatabase.Count} words");
     }
 
+    string GenerateMisspelling(string correctWord)
+    {
+        // Simple misspelling generation
+        if (correctWord.Length < 2) return correctWord;
+
+        string[] misspellings = new string[]
+        {
+            SwapAdjacentLetters(correctWord),
+            DoubleLetter(correctWord),
+            OmitLetter(correctWord),
+            AddExtraLetter(correctWord)
+        };
+
+        return misspellings[random.Next(misspellings.Length)];
+    }
+
+    string SwapAdjacentLetters(string word)
+    {
+        if (word.Length < 2) return word;
+        int pos = random.Next(word.Length - 1);
+        char[] chars = word.ToCharArray();
+        char temp = chars[pos];
+        chars[pos] = chars[pos + 1];
+        chars[pos + 1] = temp;
+        return new string(chars);
+    }
+
+    string DoubleLetter(string word)
+    {
+        if (word.Length < 1) return word;
+        int pos = random.Next(word.Length);
+        return word.Insert(pos, word[pos].ToString());
+    }
+
+    string OmitLetter(string word)
+    {
+        if (word.Length < 2) return word;
+        int pos = random.Next(word.Length);
+        return word.Remove(pos, 1);
+    }
+
+    string AddExtraLetter(string word)
+    {
+        string letters = "abcdefghijklmnopqrstuvwxyz";
+        int pos = random.Next(word.Length + 1);
+        char extra = letters[random.Next(letters.Length)];
+        return word.Insert(pos, extra.ToString());
+    }
+
+    void AddFallbackWords()
+    {
+        // Fallback words in case file loading fails
+        string[] words = { "apple", "banana", "cherry", "dog", "cat", "house", "car", "book", "computer", "phone" };
+        foreach (string word in words)
+        {
+            WordData data = new WordData();
+            data.correctWord = word;
+            data.misspelling = GenerateMisspelling(word);
+            wordDatabase.Add(data);
+        }
+    }
+
+    void StartSpawning()
+    {
+        StartCoroutine(SpawnWords());
+    }
+
     IEnumerator SpawnWords()
     {
-        while (isGameActive && !isBonusActive)
+        while (isGameActive)
         {
-            yield return new WaitForSeconds(spawnInterval);
+            yield return new WaitForSeconds(currentSpawnInterval);
 
-            if (!isBonusActive && isGameActive && gameTimer > 0)
+            if (isGameActive && !isPaused)
             {
                 SpawnRandomWord();
             }
         }
-        Debug.Log("SpawnWords coroutine ended");
     }
 
     void SpawnRandomWord()
     {
         if (wordPrefab == null || wordDatabase.Count == 0) return;
 
-        WordData data = wordDatabase[Random.Range(0, wordDatabase.Count)];
-        bool useCorrect = Random.value > 0.5f;
+        WordData data = wordDatabase[random.Next(wordDatabase.Count)];
+
+        // 50/50 chance for correct vs misspelled
+        bool useCorrect = random.Next(2) == 0;
         string wordToShow = useCorrect ? data.correctWord : data.misspelling;
 
         GameObject newWord = Instantiate(wordPrefab, gameCanvas.transform);
@@ -177,27 +240,16 @@ public class GameManager : MonoBehaviour
         if (rect != null && spawnPoint != null)
         {
             RectTransform spawnRect = spawnPoint.GetComponent<RectTransform>();
-            if (spawnRect != null)
-            {
-                rect.anchoredPosition = spawnRect.anchoredPosition;
-            }
-            else
-            {
-                rect.anchoredPosition = new Vector2(0, 400);
-            }
+            rect.anchoredPosition = spawnRect != null ? spawnRect.anchoredPosition : new Vector2(0, 400);
         }
 
         Word wordScript = newWord.GetComponent<Word>();
         if (wordScript != null)
         {
-            wordScript.Initialize(wordToShow, data.definition, useCorrect, useCorrect ? "" : data.correctWord);
+            wordScript.Initialize(wordToShow, useCorrect, useCorrect ? "" : data.correctWord);
         }
 
-        activeWords.Add(newWord);
-
-        // Track the coroutine
-        Coroutine fallCoroutine = StartCoroutine(FallWord(newWord));
-        activeFallCoroutines.Add(fallCoroutine);
+        StartCoroutine(FallWord(newWord));
     }
 
     IEnumerator FallWord(GameObject word)
@@ -208,12 +260,11 @@ public class GameManager : MonoBehaviour
         if (rect == null) yield break;
 
         float fallSpeed = 150f;
-        float bottomY = -527f;
+        float bottomY = -980f;
 
         while (word != null && rect.anchoredPosition.y > bottomY)
         {
-            // Only fall if not in bonus mode AND game is active
-            if (!isBonusActive && isGameActive)
+            if (isGameActive && !isPaused)
             {
                 Vector2 newPos = rect.anchoredPosition;
                 newPos.y -= fallSpeed * Time.deltaTime;
@@ -222,195 +273,116 @@ public class GameManager : MonoBehaviour
             yield return null;
         }
 
-        // Word reached bottom without being sorted - ONLY penalize if not in bonus mode
-        if (word != null && !isBonusActive && isGameActive)
+        if (word != null)
         {
-            Debug.Log($"Word '{word.GetComponent<Word>()?.wordText}' fell off screen! -10 points");
-            if (ScoreManager.Instance != null)
-                ScoreManager.Instance.AddPoints(-10);
-
-            activeWords.Remove(word);
+            AddPoints(-10); // Penalty for missing word
+            ShowScorePopup(-10, rect.position);
             Destroy(word);
-        }
-        else if (word != null)
-        {
-            // Word was destroyed during bonus mode - just remove from tracking
-            activeWords.Remove(word);
-            Destroy(word);
+            ResetCombo();
         }
     }
 
-    public void StartSpellingCorrection(Word word)
+    public void AddPoints(int points)
     {
-        if (isBonusActive) return;
-
-        Debug.Log($"=== STARTING SPELLING CORRECTION ===");
-        Debug.Log($"Word: {word.wordText}");
-        Debug.Log($"Correct spelling: {word.correctSpelling}");
-
-        if (bonusTimerCoroutine != null)
+        // Apply combo multiplier
+        if (points > 0)
         {
-            StopCoroutine(bonusTimerCoroutine);
-            bonusTimerCoroutine = null;
-        }
-
-        currentWordForCorrection = word;
-        currentCorrectSpelling = word.correctSpelling;
-        currentWrongWord = word.wordText;
-        isBonusActive = true;
-        isGameActive = false;
-
-        StopSpawning();
-
-        // Note: We DON'T pause time or destroy other words
-        // The FallWord coroutines check isBonusActive and will pause automatically
-
-        // Show popup
-        if (spellingPopup != null)
-        {
-            spellingPopup.SetActive(true);
-            spellingPopup.transform.SetAsLastSibling();
-
-            if (spellingInput != null)
+            // Check if within combo window
+            if (Time.time - lastScoreTime < COMBO_WINDOW)
             {
-                spellingInput.text = "";
-                spellingInput.Select();
-                spellingInput.ActivateInputField();
+                combo++;
+                points *= (1 + combo / 10); // Combo bonus: +10% per combo
             }
-        }
-
-        bonusTimerCoroutine = StartCoroutine(BonusTimerRoutine());
-    }
-
-    IEnumerator BonusTimerRoutine()
-    {
-        float timer = bonusTimerDuration;
-
-        while (timer > 0)
-        {
-            if (UIManager.Instance != null)
-                UIManager.Instance.UpdateBonusTimer(timer);
-
-            yield return new WaitForSecondsRealtime(0.1f);
-            timer -= 0.1f;
-        }
-
-        if (isBonusActive)
-        {
-            Debug.Log("Bonus timer expired!");
-            EndSpellingCorrection(false);
-        }
-    }
-
-    public void SubmitSpellingCorrection()
-    {
-        Debug.Log("=== SUBMIT SPELLING CORRECTION CALLED IN GAMEMANAGER ===");
-
-        if (!isBonusActive)
-        {
-            Debug.LogWarning("Not in bonus mode - ignoring submission");
-            return;
-        }
-
-        if (string.IsNullOrEmpty(currentCorrectSpelling))
-        {
-            Debug.LogError("currentCorrectSpelling is null or empty!");
-            return;
-        }
-
-        string submitted = "";
-        if (spellingInput != null)
-        {
-            submitted = spellingInput.text.Trim().ToLower();
-            Debug.Log($"Input text: '{submitted}'");
+            else
+            {
+                combo = 1;
+            }
+            lastScoreTime = Time.time;
         }
         else
         {
-            Debug.LogError("spellingInput is null!");
-            return;
+            ResetCombo();
         }
 
-        bool isCorrect = (submitted == currentCorrectSpelling);
-        Debug.Log($"Comparing '{submitted}' with '{currentCorrectSpelling}': {isCorrect}");
+        currentScore += points;
 
-        if (bonusTimerCoroutine != null)
-        {
-            StopCoroutine(bonusTimerCoroutine);
-            bonusTimerCoroutine = null;
-        }
+        if (ScoreManager.Instance != null)
+            ScoreManager.Instance.AddPoints(points);
 
-        EndSpellingCorrection(isCorrect);
+        if (UIManager.Instance != null)
+            UIManager.Instance.UpdateCombo(combo);
     }
 
-    void EndSpellingCorrection(bool wasCorrect)
+    void ResetCombo()
     {
-        Debug.Log($"=== ENDING SPELLING CORRECTION ===");
-
-        if (bonusTimerCoroutine != null)
-        {
-            StopCoroutine(bonusTimerCoroutine);
-            bonusTimerCoroutine = null;
-        }
-
-        // Award bonus points
-        if (wasCorrect)
-        {
-            if (ScoreManager.Instance != null)
-                ScoreManager.Instance.AddPoints(15); // Changed to 15 as per your rules
-            Debug.Log($"✓ Bonus! +15 points for correct spelling");
-        }
-        else
-        {
-            Debug.Log($"✗ No bonus - incorrect spelling");
-        }
-
-        // Close popup
-        if (spellingPopup != null)
-            spellingPopup.SetActive(false);
-
-        // Reset game state (but don't change time scale)
-        isBonusActive = false;
-        isGameActive = true;
-
-        // Remove and destroy the bonus word only
-        if (currentWordForCorrection != null)
-        {
-            activeWords.Remove(currentWordForCorrection.gameObject);
-            Destroy(currentWordForCorrection.gameObject);
-            currentWordForCorrection = null;
-        }
-
-        // Restart spawning
-        if (isGameActive && gameTimer > 0)
-        {
-            StartSpawning();
-        }
-
-        Debug.Log("Bonus mode ended - words will resume falling");
+        combo = 0;
+        if (UIManager.Instance != null)
+            UIManager.Instance.UpdateCombo(0);
     }
 
-    public void RemoveWord(GameObject word)
+    public void ShowScorePopup(int points, Vector3 position)
     {
-        if (activeWords.Contains(word))
+        if (scorePopupPrefab != null)
         {
-            activeWords.Remove(word);
+            GameObject popup = Instantiate(scorePopupPrefab, gameCanvas.transform);
+            popup.transform.position = position;
+            ScorePopup popupScript = popup.GetComponent<ScorePopup>();
+            if (popupScript != null)
+            {
+                popupScript.Initialize(points);
+            }
+            Destroy(popup, 0.8f);
         }
+    }
+
+    public void ActivatePowerUp()
+    {
+        if (isPowerUpActive) return;
+
+        isPowerUpActive = true;
+
+        if (spellingCorrectionPowerUpEnabled)
+        {
+            // Slow down game instead of pausing
+            Time.timeScale = 0.5f;
+            StartCoroutine(PowerUpTimer());
+        }
+    }
+
+    IEnumerator PowerUpTimer()
+    {
+        yield return new WaitForSecondsRealtime(powerUpDuration);
+
+        // Deactivate power-up
+        Time.timeScale = 1f;
+        isPowerUpActive = false;
+    }
+
+    public void PauseGame()
+    {
+        isPaused = true;
+        Time.timeScale = 0f;
+    }
+
+    public void ResumeGame()
+    {
+        isPaused = false;
+        Time.timeScale = 1f;
     }
 
     void EndGame()
     {
         isGameActive = false;
-        StopSpawning();
         Time.timeScale = 0f;
 
         if (UIManager.Instance != null)
-            UIManager.Instance.ShowGameOver();
+            UIManager.Instance.ShowGameOver(currentScore);
 
-        Debug.Log($"Game Over! Final Score: {(ScoreManager.Instance != null ? ScoreManager.Instance.GetScore() : 0)}");
+        Debug.Log($"Game Over! Final Score: {currentScore}");
     }
 
-    public bool IsGameActive()
+    public int GetScore()
     {
-        return isGameActive && !isBonusActive;
+        return currentScore;
     }
 }

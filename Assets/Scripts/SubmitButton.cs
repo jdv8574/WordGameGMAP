@@ -37,6 +37,6 @@ public class SubmitButton : MonoBehaviour, IPointerClickHandler
         }
 
         Debug.Log("GameManager.Instance found, calling SubmitSpellingCorrection");
-        GameManager.Instance.SubmitSpellingCorrection();
+        //GameManager.Instance.SubmitSpellingCorrection();
     }
 }
