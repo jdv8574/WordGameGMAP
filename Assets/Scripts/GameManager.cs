@@ -59,7 +59,7 @@ public class GameManager : MonoBehaviour
         new DifficultyTier { comboThreshold = 5, spawnIntervalMultiplier = 0.85f, fallSpeedMultiplier = 1.15f, commonWordChanceReduction = 10 },
         new DifficultyTier { comboThreshold = 10, spawnIntervalMultiplier = 0.7f, fallSpeedMultiplier = 1.3f, commonWordChanceReduction = 15 },
         new DifficultyTier { comboThreshold = 15, spawnIntervalMultiplier = 0.55f, fallSpeedMultiplier = 1.5f, commonWordChanceReduction = 25 },
-        new DifficultyTier { comboThreshold = 20, spawnIntervalMultiplier = 0.4f, fallSpeedMultiplier = 1.75f, commonWordChanceReduction = 40 }
+        new DifficultyTier { comboThreshold = 20, spawnIntervalMultiplier = 0.4f, fallSpeedMultiplier = 1.65f, commonWordChanceReduction = 40 }
     };
 
     public ParticleSystem speedEffectParticles;
