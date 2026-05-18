@@ -1,105 +1,104 @@
 ﻿using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using TMPro;
+using UnityEngine.UI;
 
 public class GameManager : MonoBehaviour
 {
     public static GameManager Instance;
 
     [Header("Word Spawning")]
-    public GameObject wordPrefab;
     public Transform spawnPoint;
+    public Transform[] spawnPoints;
     public Canvas gameCanvas;
     public float baseSpawnInterval = 2f;
     private float currentSpawnInterval;
     private bool isGameActive = true;
+    private Coroutine spawningCoroutine;
 
-    [Header("Timers")]
-    public float gameDuration = 60f;
-    private float gameTimer;
-    public UnityEngine.UI.Image timerFillImage;
-    public TextMeshProUGUI timerText;
-    private bool isPaused = false;
+    // These will be loaded from Resources
+    private GameObject wordPrefab;
+    private GameObject powerUpPrefab;
 
-    [Header("Power-ups")]
-    public bool spellingCorrectionPowerUpEnabled = false;
-    private bool isPowerUpActive = false;
-    private float powerUpDuration = 5f;
-    private float originalSpawnInterval;
+    [Header("Timers & Rounds")]
+    public float roundDuration = 30f;
+    private float roundTimer;
+    public int currentRound = 1;
+    public int maxRounds = 5;
+    private bool isRoundActive = true;
+    private bool isRoundReviewActive = false;
+
+    [Header("Timer Bar")]
+    public Image timerBarImage;
+    public Gradient timerBarGradient;
+
+    [Header("Round Review")]
+    public GameObject roundReviewPanel;
+    public TextMeshProUGUI roundReviewText;
+    public TextMeshProUGUI nextRoundWordsText;
+    public float roundReviewDuration = 3f;
+    public Button continueButton;
+
+    [Header("Difficulty Progression")]
+    public AnimationCurve spawnSpeedCurve;
+    public AnimationCurve fallSpeedCurve;
+    public float baseFallSpeed = 100f;
+    private float currentFallSpeed;
 
     [Header("Scoring")]
     private int currentScore = 0;
+    private int highScore = 0;
     private int combo = 0;
     private float lastScoreTime = 0f;
     private float comboExpireTime = 0f;
     private const float COMBO_WINDOW = 3.5f;
     private Coroutine comboExpireCoroutine;
 
-    [Header("Dynamic Difficulty")]
-    public float baseFallSpeed = 150f;
-    private float currentFallSpeed;
-    private int lastDifficultyCombo = 0;
-    public int baseCommonWordChance = 70;
-    private int currentCommonWordChance;
+    [Header("Word Pool")]
+    private List<WordData> allWords = new List<WordData>();
+    private List<WordData> currentRoundWords = new List<WordData>();
+    private List<WordData> upcomingWords = new List<WordData>();
+    private int wordsPerRound = 15;
 
-    [System.Serializable]
-    public class DifficultyTier
-    {
-        public int comboThreshold;
-        public float spawnIntervalMultiplier;
-        public float fallSpeedMultiplier;
-        public int commonWordChanceReduction; // How much to reduce common word chance by (%)
-    }
-
-    public DifficultyTier[] difficultyTiers = new DifficultyTier[]
-    {
-        new DifficultyTier { comboThreshold = 5, spawnIntervalMultiplier = 0.85f, fallSpeedMultiplier = 1.15f, commonWordChanceReduction = 10 },
-        new DifficultyTier { comboThreshold = 10, spawnIntervalMultiplier = 0.7f, fallSpeedMultiplier = 1.3f, commonWordChanceReduction = 15 },
-        new DifficultyTier { comboThreshold = 15, spawnIntervalMultiplier = 0.55f, fallSpeedMultiplier = 1.5f, commonWordChanceReduction = 25 },
-        new DifficultyTier { comboThreshold = 20, spawnIntervalMultiplier = 0.4f, fallSpeedMultiplier = 1.65f, commonWordChanceReduction = 40 }
-    };
-
-    public ParticleSystem speedEffectParticles;
-
-    [Header("Word Database")]
-    private List<WordData> wordDatabase = new List<WordData>();
-    private List<WordData> commonWords = new List<WordData>();
-    private List<WordData> uncommonWords = new List<WordData>();
-    private System.Random random = new System.Random();
-
-    [Header("Word Frequency Settings")]
-    public int minWordLength = 3;
-    public int maxWordLength = 8;
+    [Header("Power-ups")]
+    private bool isPowerUpActive = false;
+    private float powerUpDuration = 3f;
+    public float powerUpSpawnChance = 0.08f;
 
     [Header("Visual Feedback")]
     public GameObject scorePopupPrefab;
-    public Color correctColor = Color.green;
-    public Color wrongColor = Color.red;
+
+    private System.Random random = new System.Random();
+
+    // Simplified word list
+    private List<string> easyWords = new List<string>
+    {
+        "cat", "dog", "bird", "fish", "tree", "flower", "house", "car", "book", "pen",
+        "apple", "banana", "cherry", "grape", "lemon", "orange", "peach", "pear", "berry", "melon",
+        "red", "blue", "green", "yellow", "black", "white", "pink", "purple", "brown", "gray",
+        "happy", "sad", "big", "small", "hot", "cold", "fast", "slow", "new", "old",
+        "run", "walk", "jump", "sit", "stand", "sleep", "eat", "drink", "play", "work",
+        "mother", "father", "sister", "brother", "friend", "teacher", "doctor", "nurse", "driver", "farmer"
+    };
+
+    public enum PowerUpType
+    {
+        ExtraPoints,
+        TimeBonus,
+        AutoSort,
+        SlowTime
+    }
 
     [System.Serializable]
     public class WordData
     {
         public string correctWord;
         public string misspelling;
-        public int frequencyRank = 999;
+        public int length;
+        public float difficultyScore;
     }
-
-    private HashSet<string> commonWordSet = new HashSet<string>
-    {
-        "the", "be", "to", "of", "and", "a", "in", "that", "have", "i",
-        "it", "for", "not", "on", "with", "he", "as", "you", "do", "at",
-        "this", "but", "his", "by", "from", "they", "we", "say", "her", "she",
-        "or", "an", "will", "my", "one", "all", "would", "there", "their", "what",
-        "so", "up", "out", "if", "about", "who", "get", "which", "go", "me",
-        "when", "make", "can", "like", "time", "no", "just", "him", "know", "take",
-        "people", "into", "year", "your", "good", "some", "could", "them", "see", "other",
-        "than", "then", "now", "look", "only", "come", "its", "over", "think", "also",
-        "back", "after", "use", "two", "how", "our", "work", "first", "well", "way",
-        "even", "new", "want", "because", "any", "these", "give", "day", "most", "us"
-    };
 
     void Awake()
     {
@@ -107,220 +106,91 @@ public class GameManager : MonoBehaviour
             Instance = this;
         else
             Destroy(gameObject);
+
+        LoadHighScore();
+
+        // Load prefabs from Resources
+        LoadPrefabs();
+    }
+
+    void LoadPrefabs()
+    {
+        // Load WordPrefab from Resources folder
+        wordPrefab = Resources.Load<GameObject>("FallingWord");
+        if (wordPrefab == null)
+        {
+            Debug.LogError("WordPrefab not found in Resources folder! Please create a Resources folder and put your WordPrefab there.");
+        }
+        else
+        {
+            Debug.Log("WordPrefab loaded successfully from Resources");
+        }
+
+        // Load PowerUpPrefab from Resources folder (optional)
+        powerUpPrefab = Resources.Load<GameObject>("PowerUp");
+        if (powerUpPrefab == null)
+        {
+            Debug.Log("PowerUpPrefab not found in Resources folder - power-ups disabled");
+        }
     }
 
     void Start()
     {
-        LoadWordDatabaseFromFile();
-        gameTimer = gameDuration;
-        currentSpawnInterval = baseSpawnInterval;
-        originalSpawnInterval = baseSpawnInterval;
-        currentFallSpeed = baseFallSpeed;
-        currentCommonWordChance = baseCommonWordChance;
-
-        UpdateTimerDisplay();
-
-        if (gameCanvas == null)
-            gameCanvas = FindObjectOfType<Canvas>();
-
-        if (spawnPoint == null)
-        {
-            GameObject spawn = new GameObject("SpawnPoint");
-            spawn.transform.SetParent(gameCanvas.transform);
-            spawnPoint = spawn.transform;
-            RectTransform rect = spawnPoint.gameObject.AddComponent<RectTransform>();
-            rect.anchoredPosition = new Vector2(0, 400);
-        }
-
-        StartSpawning();
+        LoadWordDatabase();
+        SetupAnimationCurves();
+        SetupTimerBar();
+        StartRound();
         Time.timeScale = 1f;
-
-        Debug.Log($"Game started! Base spawn: {baseSpawnInterval}s, Base fall speed: {baseFallSpeed}, Common word chance: {baseCommonWordChance}%");
     }
 
-    void Update()
+    void LoadWordDatabase()
     {
-        if (!isGameActive || isPaused) return;
+        allWords.Clear();
 
-        gameTimer -= Time.deltaTime;
-        UpdateTimerDisplay();
-
-        if (gameTimer <= 0)
+        foreach (string word in easyWords)
         {
-            gameTimer = 0;
-            EndGame();
+            WordData data = new WordData();
+            data.correctWord = word;
+            data.misspelling = GenerateSimpleMisspelling(word);
+            data.length = word.Length;
+            data.difficultyScore = CalculateSimpleDifficulty(word);
+            allWords.Add(data);
         }
 
-        if (UIManager.Instance != null && combo > 0)
-        {
-            float remainingTime = comboExpireTime - Time.time;
-            if (remainingTime > 0)
-            {
-                UIManager.Instance.UpdateComboTime(remainingTime);
-            }
-        }
+        allWords = allWords.OrderBy(w => w.difficultyScore).ToList();
+
+        Debug.Log($"Loaded {allWords.Count} easy words");
+        PrepareWordPools();
     }
 
-    void UpdateTimerDisplay()
+    float CalculateSimpleDifficulty(string word)
     {
-        if (timerFillImage != null)
-        {
-            float fillAmount = Mathf.Clamp01(gameTimer / gameDuration);
-            timerFillImage.fillAmount = fillAmount;
+        float score = 0f;
+        score += word.Length * 0.1f;
 
-            if (fillAmount < 0.3f)
-                timerFillImage.color = Color.red;
-            else if (fillAmount < 0.6f)
-                timerFillImage.color = Color.yellow;
-            else
-                timerFillImage.color = Color.green;
-        }
+        if (word.All(c => "aeiou".Contains(c))) score -= 0.3f;
+        if (word.Length <= 4) score -= 0.2f;
 
-        if (timerText != null)
-        {
-            timerText.text = $"{Mathf.CeilToInt(gameTimer)}s";
-        }
-
-        if (UIManager.Instance != null)
-            UIManager.Instance.UpdateTimer(gameTimer);
+        return Mathf.Clamp(score, 0.3f, 1.5f);
     }
 
-    void UpdateDifficultyBasedOnCombo()
+    string GenerateSimpleMisspelling(string correctWord)
     {
-        // Find current difficulty tier
-        DifficultyTier currentTier = null;
-        for (int i = difficultyTiers.Length - 1; i >= 0; i--)
-        {
-            if (combo >= difficultyTiers[i].comboThreshold)
-            {
-                currentTier = difficultyTiers[i];
-                break;
-            }
-        }
-
-        // Apply difficulty changes if tier changed
-        if (currentTier != null && lastDifficultyCombo != combo)
-        {
-            float newSpawnInterval = baseSpawnInterval * currentTier.spawnIntervalMultiplier;
-            float newFallSpeed = baseFallSpeed * currentTier.fallSpeedMultiplier;
-            int newCommonWordChance = Mathf.Max(0, baseCommonWordChance - currentTier.commonWordChanceReduction);
-
-            if (Mathf.Abs(currentSpawnInterval - newSpawnInterval) > 0.01f)
-            {
-                currentSpawnInterval = newSpawnInterval;
-                currentFallSpeed = newFallSpeed;
-                currentCommonWordChance = newCommonWordChance;
-
-                Debug.Log($"Difficulty increased! Spawn: {currentSpawnInterval:F2}s, Fall speed: {newFallSpeed:F0}, Common word chance: {currentCommonWordChance}%");
-
-                // Play effect
-                if (speedEffectParticles != null)
-                    speedEffectParticles.Play();
-            }
-
-            lastDifficultyCombo = combo;
-        }
-        else if (currentTier == null && lastDifficultyCombo != 0)
-        {
-            // Reset to base difficulty when combo resets
-            if (Mathf.Abs(currentSpawnInterval - baseSpawnInterval) > 0.01f)
-            {
-                currentSpawnInterval = baseSpawnInterval;
-                currentFallSpeed = baseFallSpeed;
-                currentCommonWordChance = baseCommonWordChance;
-                Debug.Log($"Difficulty reset to Normal! Spawn: {currentSpawnInterval}s, Fall speed: {currentFallSpeed:F0}, Common word chance: {currentCommonWordChance}%");
-                lastDifficultyCombo = 0;
-            }
-        }
-    }
-
-    void LoadWordDatabaseFromFile()
-    {
-        wordDatabase.Clear();
-        commonWords.Clear();
-        uncommonWords.Clear();
-
-        TextAsset wordFile = Resources.Load<TextAsset>("words_alpha");
-        if (wordFile != null)
-        {
-            string[] words = wordFile.text.Split('\n');
-            int frequencyCounter = 1;
-
-            foreach (string word in words)
-            {
-                if (!string.IsNullOrWhiteSpace(word))
-                {
-                    string cleanWord = word.Trim().ToLower();
-
-                    if (cleanWord.Length >= minWordLength && cleanWord.Length <= maxWordLength)
-                    {
-                        WordData data = new WordData();
-                        data.correctWord = cleanWord;
-                        data.misspelling = GenerateMisspelling(cleanWord);
-
-                        if (IsCommonWord(cleanWord))
-                        {
-                            data.frequencyRank = frequencyCounter++;
-                            commonWords.Add(data);
-                        }
-                        else
-                        {
-                            data.frequencyRank = 999;
-                            uncommonWords.Add(data);
-                        }
-
-                        wordDatabase.Add(data);
-                    }
-                }
-            }
-        }
-
-        if (wordDatabase.Count == 0)
-        {
-            AddFallbackWords();
-        }
-
-        ShuffleList(commonWords);
-        ShuffleList(uncommonWords);
-
-        Debug.Log($"Loaded {commonWords.Count} common words, {uncommonWords.Count} uncommon words");
-    }
-
-    bool IsCommonWord(string word)
-    {
-        return commonWordSet.Contains(word);
-    }
-
-    void ShuffleList<T>(List<T> list)
-    {
-        for (int i = 0; i < list.Count; i++)
-        {
-            int randomIndex = random.Next(i, list.Count);
-            T temp = list[i];
-            list[i] = list[randomIndex];
-            list[randomIndex] = temp;
-        }
-    }
-
-    string GenerateMisspelling(string correctWord)
-    {
-        if (correctWord.Length < 2) return correctWord;
+        if (correctWord.Length < 3) return correctWord;
 
         string[] misspellings = new string[]
         {
-            SwapAdjacentLetters(correctWord),
-            DoubleLetter(correctWord),
-            OmitLetter(correctWord),
-            AddExtraLetter(correctWord)
+            SwapOneLetter(correctWord),
+            DoubleOneLetter(correctWord),
+            ChangeVowel(correctWord)
         };
 
-        return misspellings[random.Next(misspellings.Length)];
+        return misspellings[Random.Range(0, misspellings.Length)];
     }
 
-    string SwapAdjacentLetters(string word)
+    string SwapOneLetter(string word)
     {
-        if (word.Length < 2) return word;
-        int pos = random.Next(word.Length - 1);
+        int pos = Random.Range(0, word.Length - 1);
         char[] chars = word.ToCharArray();
         char temp = chars[pos];
         chars[pos] = chars[pos + 1];
@@ -328,78 +198,342 @@ public class GameManager : MonoBehaviour
         return new string(chars);
     }
 
-    string DoubleLetter(string word)
+    string DoubleOneLetter(string word)
     {
-        if (word.Length < 1) return word;
-        int pos = random.Next(word.Length);
+        int pos = Random.Range(0, word.Length);
         return word.Insert(pos, word[pos].ToString());
     }
 
-    string OmitLetter(string word)
+    string ChangeVowel(string word)
     {
-        if (word.Length < 2) return word;
-        int pos = random.Next(word.Length);
-        return word.Remove(pos, 1);
-    }
+        char[] vowels = { 'a', 'e', 'i', 'o', 'u' };
+        char[] chars = word.ToCharArray();
 
-    string AddExtraLetter(string word)
-    {
-        string letters = "abcdefghijklmnopqrstuvwxyz";
-        int pos = random.Next(word.Length + 1);
-        char extra = letters[random.Next(letters.Length)];
-        return word.Insert(pos, extra.ToString());
-    }
-
-    void AddFallbackWords()
-    {
-        string[] words = { "apple", "banana", "cherry", "dog", "cat", "house", "car", "book", "computer", "phone" };
-        foreach (string word in words)
+        for (int i = 0; i < chars.Length; i++)
         {
-            WordData data = new WordData();
-            data.correctWord = word;
-            data.misspelling = GenerateMisspelling(word);
-            if (IsCommonWord(word))
-                commonWords.Add(data);
-            else
-                uncommonWords.Add(data);
-            wordDatabase.Add(data);
+            if (vowels.Contains(chars[i]))
+            {
+                char newVowel = vowels[Random.Range(0, vowels.Length)];
+                chars[i] = newVowel;
+                break;
+            }
+        }
+
+        return new string(chars);
+    }
+
+    void SetupTimerBar()
+    {
+        if (timerBarImage != null)
+        {
+            if (timerBarGradient == null)
+            {
+                timerBarGradient = new Gradient();
+                timerBarGradient.SetKeys(
+                    new GradientColorKey[] {
+                        new GradientColorKey(Color.green, 0f),
+                        new GradientColorKey(Color.yellow, 0.5f),
+                        new GradientColorKey(Color.red, 1f)
+                    },
+                    new GradientAlphaKey[] {
+                        new GradientAlphaKey(1f, 0f),
+                        new GradientAlphaKey(1f, 1f)
+                    }
+                );
+            }
+
+            timerBarImage.type = Image.Type.Filled;
+            timerBarImage.fillMethod = Image.FillMethod.Horizontal;
+            timerBarImage.fillOrigin = (int)Image.OriginHorizontal.Left;
         }
     }
 
-    void StartSpawning()
+    void UpdateTimerBar()
     {
-        StartCoroutine(SpawnWords());
+        if (timerBarImage != null)
+        {
+            float fillAmount = roundTimer / roundDuration;
+            timerBarImage.fillAmount = fillAmount;
+            timerBarImage.color = timerBarGradient.Evaluate(1f - fillAmount);
+        }
+    }
+
+    void SetupAnimationCurves()
+    {
+        if (spawnSpeedCurve == null || spawnSpeedCurve.keys.Length == 0)
+        {
+            spawnSpeedCurve = new AnimationCurve();
+            spawnSpeedCurve.AddKey(0f, 1f);
+            spawnSpeedCurve.AddKey(0.25f, 0.9f);
+            spawnSpeedCurve.AddKey(0.5f, 0.8f);
+            spawnSpeedCurve.AddKey(0.75f, 0.7f);
+            spawnSpeedCurve.AddKey(1f, 0.6f);
+        }
+
+        if (fallSpeedCurve == null || fallSpeedCurve.keys.Length == 0)
+        {
+            fallSpeedCurve = new AnimationCurve();
+            fallSpeedCurve.AddKey(0f, 1f);
+            fallSpeedCurve.AddKey(0.25f, 1.1f);
+            fallSpeedCurve.AddKey(0.5f, 1.2f);
+            fallSpeedCurve.AddKey(0.75f, 1.35f);
+            fallSpeedCurve.AddKey(1f, 1.5f);
+        }
+    }
+
+    void PrepareWordPools()
+    {
+        currentRoundWords.Clear();
+        upcomingWords.Clear();
+
+        float roundProgress = (float)(currentRound - 1) / (maxRounds - 1);
+        float targetDifficulty = Mathf.Lerp(0.3f, 1.2f, roundProgress);
+
+        var eligibleWords = allWords.Where(w =>
+            Mathf.Abs(w.difficultyScore - targetDifficulty) < 0.5f).ToList();
+
+        if (eligibleWords.Count < wordsPerRound)
+            eligibleWords = allWords;
+
+        eligibleWords = eligibleWords.OrderBy(x => random.Next()).ToList();
+
+        for (int i = 0; i < Mathf.Min(wordsPerRound, eligibleWords.Count); i++)
+        {
+            currentRoundWords.Add(eligibleWords[i]);
+        }
+
+        float nextTargetDifficulty = Mathf.Lerp(0.3f, 1.4f, (float)currentRound / maxRounds);
+        var nextEligible = allWords.Where(w =>
+            Mathf.Abs(w.difficultyScore - nextTargetDifficulty) < 0.5f).ToList();
+
+        nextEligible = nextEligible.OrderBy(x => random.Next()).ToList();
+        for (int i = 0; i < 10 && i < nextEligible.Count; i++)
+        {
+            upcomingWords.Add(nextEligible[i]);
+        }
+
+        if (UIManager.Instance != null && currentRoundWords.Count > 0)
+        {
+            string newWordsList = string.Join(", ", currentRoundWords.Take(5).Select(w => w.correctWord));
+            UIManager.Instance.ShowNewWordsAnnouncement(newWordsList);
+        }
+    }
+
+    void StartRound()
+    {
+        Debug.Log($"Starting Round {currentRound}");
+
+        // Verify prefab is loaded
+        if (wordPrefab == null)
+        {
+            LoadPrefabs();
+            if (wordPrefab == null)
+            {
+                Debug.LogError("Cannot start round - WordPrefab is missing!");
+                return;
+            }
+        }
+
+        isRoundActive = true;
+        isRoundReviewActive = false;
+        roundTimer = roundDuration;
+
+        float roundProgress = (float)(currentRound - 1) / (maxRounds - 1);
+        currentSpawnInterval = baseSpawnInterval * spawnSpeedCurve.Evaluate(roundProgress);
+        currentFallSpeed = baseFallSpeed * fallSpeedCurve.Evaluate(roundProgress);
+
+        UpdateTimerBar();
+
+        // Stop any existing spawning coroutine
+        if (spawningCoroutine != null)
+        {
+            StopCoroutine(spawningCoroutine);
+        }
+
+        // Start new spawning coroutine
+        spawningCoroutine = StartCoroutine(SpawnWords());
+
+        if (UIManager.Instance != null)
+            UIManager.Instance.ShowRoundStart(currentRound);
+
+        Debug.Log($"Round {currentRound} started! Spawn interval: {currentSpawnInterval:F2}s");
+    }
+
+    void StopRound()
+    {
+        isRoundActive = false;
+
+        // Stop spawning
+        if (spawningCoroutine != null)
+        {
+            StopCoroutine(spawningCoroutine);
+            spawningCoroutine = null;
+        }
+
+        // Destroy all active words
+        Word[] activeWords = FindObjectsOfType<Word>();
+        Debug.Log($"Destroying {activeWords.Length} active words");
+        foreach (Word word in activeWords)
+        {
+            if (word != null && word.gameObject != null)
+                Destroy(word.gameObject);
+        }
+
+        // Destroy all power-ups
+        PowerUp[] powerUps = FindObjectsOfType<PowerUp>();
+        foreach (PowerUp powerUp in powerUps)
+        {
+            if (powerUp != null && powerUp.gameObject != null)
+                Destroy(powerUp.gameObject);
+        }
+    }
+
+    void Update()
+    {
+        if (!isGameActive || !isRoundActive || isRoundReviewActive) return;
+
+        roundTimer -= Time.deltaTime;
+        UpdateTimerBar();
+
+        if (UIManager.Instance != null)
+            UIManager.Instance.UpdateRoundTimer(roundTimer, currentRound);
+
+        if (roundTimer <= 0)
+        {
+            EndRound();
+        }
+    }
+
+    void EndRound()
+    {
+        Debug.Log($"Ending Round {currentRound}");
+        StopRound();
+        StartCoroutine(RoundReview());
+    }
+
+    IEnumerator RoundReview()
+    {
+        isRoundReviewActive = true;
+
+        if (roundReviewPanel != null)
+        {
+            roundReviewPanel.SetActive(true);
+            if (roundReviewText != null)
+            {
+                roundReviewText.text = $"ROUND {currentRound} COMPLETE!\n\nScore: {currentScore}";
+            }
+
+            if (nextRoundWordsText != null && upcomingWords.Count > 0)
+            {
+                string nextWords = string.Join(", ", upcomingWords.Take(5).Select(w => w.correctWord));
+                string nextMessage = (currentRound < maxRounds) ?
+                    $"Next round words:\n{nextWords}\n\nClick Continue for Round {currentRound + 1}!" :
+                    "FINAL ROUND COMPLETE!\nClick Continue for Final Score!";
+                nextRoundWordsText.text = nextMessage;
+            }
+        }
+
+        // Wait for continue button or auto-continue
+        float autoTime = 0f;
+        bool continuePressed = false;
+
+        // Set up button listener if button exists
+        if (continueButton != null)
+        {
+            continueButton.onClick.RemoveAllListeners();
+            continueButton.onClick.AddListener(() => { continuePressed = true; });
+        }
+
+        while (autoTime < roundReviewDuration && !continuePressed)
+        {
+            autoTime += Time.deltaTime;
+            yield return null;
+        }
+
+        ContinueToNextRound();
+    }
+
+    public void ContinueToNextRound()
+    {
+        Debug.Log("ContinueToNextRound called");
+
+        if (roundReviewPanel != null)
+            roundReviewPanel.SetActive(false);
+
+        if (currentRound < maxRounds)
+        {
+            currentRound++;
+            PrepareWordPools();
+            StartRound();
+        }
+        else
+        {
+            EndGame();
+        }
+
+        isRoundReviewActive = false;
     }
 
     IEnumerator SpawnWords()
     {
-        while (isGameActive)
-        {
-            yield return new WaitForSeconds(currentSpawnInterval);
+        Debug.Log("SpawnWords coroutine started");
 
-            if (isGameActive && !isPaused)
+        while (isGameActive && isRoundActive && !isRoundReviewActive)
+        {
+            float actualSpawnInterval = currentSpawnInterval * Random.Range(0.8f, 1.2f);
+            yield return new WaitForSeconds(actualSpawnInterval);
+
+            if (isGameActive && isRoundActive && !isRoundReviewActive)
             {
                 SpawnRandomWord();
+
+                if (powerUpPrefab != null && Random.value < powerUpSpawnChance)
+                {
+                    SpawnPowerUp();
+                }
             }
         }
+
+        Debug.Log("SpawnWords coroutine ended");
     }
 
     void SpawnRandomWord()
     {
-        if (wordPrefab == null) return;
+        // Verify prefab is loaded
+        if (wordPrefab == null)
+        {
+            LoadPrefabs();
+            if (wordPrefab == null)
+            {
+                Debug.LogError("WordPrefab is missing! Make sure it's in a Resources folder.");
+                return;
+            }
+        }
 
-        WordData data = SelectWordByFrequency();
+        if (currentRoundWords.Count == 0)
+        {
+            Debug.LogWarning("No words available for current round!");
+            return;
+        }
+
+        WordData data = currentRoundWords[Random.Range(0, currentRoundWords.Count)];
         if (data == null) return;
 
-        bool useCorrect = random.Next(2) == 0;
+        bool useCorrect = Random.value > 0.5f;
         string wordToShow = useCorrect ? data.correctWord : data.misspelling;
+
+        Transform selectedSpawn = spawnPoint;
+        if (spawnPoints != null && spawnPoints.Length > 0)
+        {
+            selectedSpawn = spawnPoints[Random.Range(0, spawnPoints.Length)];
+        }
 
         GameObject newWord = Instantiate(wordPrefab, gameCanvas.transform);
 
         RectTransform rect = newWord.GetComponent<RectTransform>();
-        if (rect != null && spawnPoint != null)
+        if (rect != null && selectedSpawn != null)
         {
-            RectTransform spawnRect = spawnPoint.GetComponent<RectTransform>();
+            RectTransform spawnRect = selectedSpawn.GetComponent<RectTransform>();
             rect.anchoredPosition = spawnRect != null ? spawnRect.anchoredPosition : new Vector2(0, 400);
         }
 
@@ -412,27 +546,128 @@ public class GameManager : MonoBehaviour
         StartCoroutine(FallWord(newWord));
     }
 
-    WordData SelectWordByFrequency()
+    void SpawnPowerUp()
     {
-        // Use current common word chance (which decreases with combo)
-        bool pickCommon = random.Next(100) < currentCommonWordChance;
+        if (powerUpPrefab == null) return;
 
-        if (pickCommon && commonWords.Count > 0)
+        PowerUpType[] types = { PowerUpType.ExtraPoints, PowerUpType.TimeBonus, PowerUpType.AutoSort, PowerUpType.SlowTime };
+        PowerUpType type = types[Random.Range(0, types.Length)];
+
+        GameObject powerUp = Instantiate(powerUpPrefab, gameCanvas.transform);
+
+        Transform selectedSpawn = spawnPoint;
+        if (spawnPoints != null && spawnPoints.Length > 0)
         {
-            // Pick from common words
-            return commonWords[random.Next(commonWords.Count)];
-        }
-        else if (uncommonWords.Count > 0)
-        {
-            // Pick from uncommon words
-            return uncommonWords[random.Next(uncommonWords.Count)];
-        }
-        else if (commonWords.Count > 0)
-        {
-            return commonWords[random.Next(commonWords.Count)];
+            selectedSpawn = spawnPoints[Random.Range(0, spawnPoints.Length)];
         }
 
-        return null;
+        RectTransform rect = powerUp.GetComponent<RectTransform>();
+        if (rect != null && selectedSpawn != null)
+        {
+            RectTransform spawnRect = selectedSpawn.GetComponent<RectTransform>();
+            rect.anchoredPosition = spawnRect != null ? spawnRect.anchoredPosition : new Vector2(0, 400);
+        }
+
+        PowerUp powerUpScript = powerUp.GetComponent<PowerUp>();
+        if (powerUpScript != null)
+        {
+            powerUpScript.Initialize(type);
+        }
+
+        StartCoroutine(FallPowerUp(powerUp));
+    }
+
+    IEnumerator FallPowerUp(GameObject powerUp)
+    {
+        if (powerUp == null) yield break;
+
+        RectTransform rect = powerUp.GetComponent<RectTransform>();
+        float fallSpeed = 80f;
+        float bottomY = -980f;
+
+        while (powerUp != null && rect.anchoredPosition.y > bottomY)
+        {
+            if (isGameActive && isRoundActive && !isRoundReviewActive)
+            {
+                Vector2 newPos = rect.anchoredPosition;
+                newPos.y -= fallSpeed * Time.deltaTime;
+                rect.anchoredPosition = newPos;
+            }
+            yield return null;
+        }
+
+        if (powerUp != null)
+            Destroy(powerUp);
+    }
+
+    public void ActivatePowerUp(PowerUpType type)
+    {
+        if (isPowerUpActive) return;
+
+        isPowerUpActive = true;
+
+        switch (type)
+        {
+            case PowerUpType.ExtraPoints:
+                AddPoints(50);
+                if (UIManager.Instance != null)
+                    UIManager.Instance.ShowPowerUpMessage("+50 POINTS!");
+                break;
+            case PowerUpType.TimeBonus:
+                roundTimer += 5f;
+                UpdateTimerBar();
+                if (UIManager.Instance != null)
+                    UIManager.Instance.ShowPowerUpMessage("+5 SECONDS!");
+                break;
+            case PowerUpType.AutoSort:
+                StartCoroutine(AutoSortPowerUp());
+                break;
+            case PowerUpType.SlowTime:
+                StartCoroutine(SlowTimePowerUp());
+                break;
+        }
+
+        StartCoroutine(PowerUpCooldown());
+    }
+
+    IEnumerator AutoSortPowerUp()
+    {
+        if (UIManager.Instance != null)
+            UIManager.Instance.ShowPowerUpMessage("AUTO SORT!");
+
+        Word[] words = FindObjectsOfType<Word>();
+        foreach (Word word in words)
+        {
+            Bucket[] buckets = FindObjectsOfType<Bucket>();
+            foreach (Bucket bucket in buckets)
+            {
+                if (bucket.isCorrectBucket == word.isCorrectSpelling)
+                {
+                    word.OnSortedIntoBucket(bucket.isCorrectBucket);
+                    break;
+                }
+            }
+        }
+
+        yield return new WaitForSeconds(0.5f);
+    }
+
+    IEnumerator SlowTimePowerUp()
+    {
+        float originalTimeScale = Time.timeScale;
+        Time.timeScale = 0.5f;
+        if (UIManager.Instance != null)
+            UIManager.Instance.ShowPowerUpMessage("TIME SLOWED!");
+
+        yield return new WaitForSecondsRealtime(4f);
+
+        Time.timeScale = originalTimeScale;
+    }
+
+    IEnumerator PowerUpCooldown()
+    {
+        yield return new WaitForSeconds(powerUpDuration);
+        isPowerUpActive = false;
     }
 
     IEnumerator FallWord(GameObject word)
@@ -440,13 +675,11 @@ public class GameManager : MonoBehaviour
         if (word == null) yield break;
 
         RectTransform rect = word.GetComponent<RectTransform>();
-        if (rect == null) yield break;
-
         float bottomY = -980f;
 
         while (word != null && rect.anchoredPosition.y > bottomY)
         {
-            if (isGameActive && !isPaused)
+            if (isGameActive && isRoundActive && !isRoundReviewActive)
             {
                 Vector2 newPos = rect.anchoredPosition;
                 newPos.y -= currentFallSpeed * Time.deltaTime;
@@ -488,9 +721,6 @@ public class GameManager : MonoBehaviour
             if (comboExpireCoroutine != null)
                 StopCoroutine(comboExpireCoroutine);
             comboExpireCoroutine = StartCoroutine(ComboExpireRoutine());
-
-            // Update difficulty based on new combo
-            UpdateDifficultyBasedOnCombo();
         }
         else
         {
@@ -506,10 +736,29 @@ public class GameManager : MonoBehaviour
         {
             UIManager.Instance.UpdateCombo(combo);
             if (comboBonus > 0)
-            {
                 UIManager.Instance.ShowComboBonus(comboBonus);
-            }
         }
+
+        if (currentScore > highScore)
+        {
+            highScore = currentScore;
+            SaveHighScore();
+            if (UIManager.Instance != null)
+                UIManager.Instance.UpdateHighScore(highScore);
+        }
+    }
+
+    void SaveHighScore()
+    {
+        PlayerPrefs.SetInt("HighScore", highScore);
+        PlayerPrefs.Save();
+    }
+
+    void LoadHighScore()
+    {
+        highScore = PlayerPrefs.GetInt("HighScore", 0);
+        if (UIManager.Instance != null)
+            UIManager.Instance.UpdateHighScore(highScore);
     }
 
     IEnumerator ComboExpireRoutine()
@@ -525,25 +774,17 @@ public class GameManager : MonoBehaviour
         }
 
         if (combo > 0)
-        {
             ResetCombo();
-        }
     }
 
     void ResetCombo()
     {
         combo = 0;
         if (comboExpireCoroutine != null)
-        {
             StopCoroutine(comboExpireCoroutine);
-            comboExpireCoroutine = null;
-        }
 
         if (UIManager.Instance != null)
             UIManager.Instance.UpdateCombo(0);
-
-        // Reset difficulty
-        UpdateDifficultyBasedOnCombo();
     }
 
     public void ShowScorePopup(int points, Vector3 position)
@@ -554,64 +795,22 @@ public class GameManager : MonoBehaviour
             popup.transform.position = position;
             ScorePopup popupScript = popup.GetComponent<ScorePopup>();
             if (popupScript != null)
-            {
                 popupScript.Initialize(points);
-            }
             Destroy(popup, 0.8f);
         }
-    }
-
-    public float GetCurrentFallSpeed()
-    {
-        return currentFallSpeed;
-    }
-
-    public int GetCurrentWordChance()
-    {
-        return currentCommonWordChance;
-    }
-
-    public void ActivatePowerUp()
-    {
-        if (isPowerUpActive) return;
-
-        isPowerUpActive = true;
-
-        if (spellingCorrectionPowerUpEnabled)
-        {
-            Time.timeScale = 0.5f;
-            StartCoroutine(PowerUpTimer());
-        }
-    }
-
-    IEnumerator PowerUpTimer()
-    {
-        yield return new WaitForSecondsRealtime(powerUpDuration);
-        Time.timeScale = 1f;
-        isPowerUpActive = false;
-    }
-
-    public void PauseGame()
-    {
-        isPaused = true;
-        Time.timeScale = 0f;
-    }
-
-    public void ResumeGame()
-    {
-        isPaused = false;
-        Time.timeScale = 1f;
     }
 
     void EndGame()
     {
         isGameActive = false;
+        isRoundActive = false;
+        StopRound();
         Time.timeScale = 0f;
 
         if (UIManager.Instance != null)
-            UIManager.Instance.ShowGameOver(currentScore);
+            UIManager.Instance.ShowGameOver(currentScore, highScore);
 
-        Debug.Log($"Game Over! Final Score: {currentScore}");
+        Debug.Log($"Game Over! Score: {currentScore}, High Score: {highScore}");
     }
 
     public int GetScore()

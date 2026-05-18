@@ -1,6 +1,7 @@
 using UnityEngine;
 using TMPro;
 using System.Collections;
+using UnityEngine.UI; // Add this
 
 public class UIManager : MonoBehaviour
 {
@@ -11,6 +12,8 @@ public class UIManager : MonoBehaviour
     [SerializeField] private TextMeshProUGUI comboText;
     [SerializeField] private TextMeshProUGUI comboBonusText;
     [SerializeField] private TextMeshProUGUI feedbackText;
+    [SerializeField] private TextMeshProUGUI timerText; // Add this
+    [SerializeField] private TextMeshProUGUI highScoreText; // Add this
     [SerializeField] private GameObject gameOverPanel;
     [SerializeField] private TextMeshProUGUI finalScoreText;
     [SerializeField] private GameObject comboMeter;
@@ -57,7 +60,133 @@ public class UIManager : MonoBehaviour
         }
     }
 
-    public void UpdateTimer(float time) { }
+    public void UpdateTimer(float time)
+    {
+        // For backward compatibility
+    }
+
+    public void UpdateRoundTimer(float time, int round)
+    {
+        if (timerText != null)
+            timerText.text = $"Round {round}\n{Mathf.CeilToInt(time)}s";
+    }
+
+    public void UpdateHighScore(int highScore)
+    {
+        if (highScoreText != null)
+            highScoreText.text = $"HIGH: {highScore}";
+    }
+
+    public void ShowRoundStart(int round)
+    {
+        StartCoroutine(RoundStartAnimation(round));
+    }
+
+    IEnumerator RoundStartAnimation(int round)
+    {
+        GameObject roundText = new GameObject("RoundText");
+        TextMeshProUGUI text = roundText.AddComponent<TextMeshProUGUI>();
+        text.text = $"ROUND {round}";
+        text.fontSize = 72;
+        text.alignment = TextAlignmentOptions.Center;
+        text.color = Color.yellow;
+
+        // Add outline for better visibility
+        Outline outline = roundText.AddComponent<Outline>();
+        outline.effectColor = Color.black;
+        outline.effectDistance = new Vector2(2, 2);
+
+        roundText.transform.SetParent(transform);
+        roundText.transform.position = new Vector3(Screen.width / 2, Screen.height / 2, 0);
+
+        float elapsed = 0f;
+        while (elapsed < 2f)
+        {
+            float scale = 1f + Mathf.PingPong(elapsed * 5f, 0.3f);
+            roundText.transform.localScale = Vector3.one * scale;
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        Destroy(roundText);
+    }
+
+    public void ShowNewWordsAnnouncement(string words)
+    {
+        StartCoroutine(NewWordsAnimation(words));
+    }
+
+    IEnumerator NewWordsAnimation(string words)
+    {
+        GameObject announcement = new GameObject("NewWords");
+        TextMeshProUGUI text = announcement.AddComponent<TextMeshProUGUI>();
+        text.text = $"NEW WORDS!\n{words}";
+        text.fontSize = 32;
+        text.alignment = TextAlignmentOptions.Center;
+        text.color = Color.cyan;
+
+        // Add outline
+        Outline outline = announcement.AddComponent<Outline>();
+        outline.effectColor = Color.black;
+        outline.effectDistance = new Vector2(1, 1);
+
+        announcement.transform.SetParent(transform);
+        announcement.transform.position = new Vector3(Screen.width / 2, Screen.height / 2 + 100, 0);
+
+        yield return new WaitForSeconds(3f);
+
+        float fadeTime = 1f;
+        float elapsed = 0f;
+        Color color = text.color;
+        while (elapsed < fadeTime)
+        {
+            color.a = 1f - (elapsed / fadeTime);
+            text.color = color;
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        Destroy(announcement);
+    }
+
+    public void ShowPowerUpMessage(string message)
+    {
+        StartCoroutine(PowerUpMessageAnimation(message));
+    }
+
+    IEnumerator PowerUpMessageAnimation(string message)
+    {
+        GameObject powerUpMsg = new GameObject("PowerUpMessage");
+        TextMeshProUGUI text = powerUpMsg.AddComponent<TextMeshProUGUI>();
+        text.text = message;
+        text.fontSize = 48;
+        text.alignment = TextAlignmentOptions.Center;
+        text.color = Color.magenta;
+
+        // Add outline
+        Outline outline = powerUpMsg.AddComponent<Outline>();
+        outline.effectColor = Color.black;
+        outline.effectDistance = new Vector2(2, 2);
+
+        powerUpMsg.transform.SetParent(transform);
+        powerUpMsg.transform.position = new Vector3(Screen.width / 2, Screen.height / 2, 0);
+
+        float elapsed = 0f;
+        while (elapsed < 1.5f)
+        {
+            float scale = 1f + Mathf.Sin(elapsed * 20f) * 0.2f;
+            powerUpMsg.transform.localScale = Vector3.one * scale;
+
+            Color color = text.color;
+            color.a = 1f - (elapsed / 1.5f);
+            text.color = color;
+
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        Destroy(powerUpMsg);
+    }
 
     public void ShowFeedback(string text, bool isPositive)
     {
@@ -180,12 +309,16 @@ public class UIManager : MonoBehaviour
 
     public void UpdateComboTime(float remainingTime) { }
 
-    public void ShowGameOver(int finalScore)
+    public void ShowGameOver(int finalScore, int highScore)
     {
         if (gameOverPanel != null)
         {
             if (finalScoreText != null)
-                finalScoreText.text = $"Final Score: {finalScore}";
+            {
+                bool isNewHighScore = finalScore >= highScore && finalScore > 0;
+                finalScoreText.text = $"Final Score: {finalScore}\n";
+                finalScoreText.text += isNewHighScore ? "NEW HIGH SCORE!" : $"High Score: {highScore}";
+            }
             gameOverPanel.SetActive(true);
         }
     }
